@@ -36,6 +36,7 @@ func main() {
 	}
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -127,5 +128,14 @@ func handlerRegister(s *state, cmd command) error {
 	fmt.Printf("user '%s' created\n", name)
 	fmt.Printf("user = %v\n", user)
 
+	return nil
+}
+
+func handlerReset(s *state, cmd command) error {
+	err := s.db.DeleteAllUsers(context.Background())
+	if err != nil {
+		log.Printf("unable to delete all users! %v", err)
+		os.Exit(1)
+	}
 	return nil
 }
