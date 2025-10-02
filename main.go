@@ -45,6 +45,7 @@ func main() {
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerAddFeed)
 	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", handlerFollow)
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -229,6 +230,43 @@ func handlerFeeds(s *state, cmd command) error {
 		fmt.Printf("User: %s\n", user.Name)
 		fmt.Println()
 	}
+
+	return nil
+}
+
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("follow expects 1 argument: url")
+	}
+	url := cmd.args[0]
+	feed, err := s.db.GetFeedByUrl(context.Background(), url)
+	if err != nil {
+		return fmt.Errorf("unable to get feed by url: %w", err)
+	}
+
+	currentUser := s.cfg.CurrentUserName
+	user, err := s.db.GetUser(context.Background(), currentUser)
+	if err != nil {
+		return fmt.Errorf("unable to get user by name: %w", err)
+	}
+
+	now := time.Now()
+	params := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: now,
+		UpdatedAt: now,
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	}
+
+	feed_follow, err := s.db.CreateFeedFollow(context.Background(), params)
+	if err != nil {
+		return fmt.Errorf("unable to create feed_follow: %w", err)
+	}
+
+	fmt.Printf("created feed_follow:\n")
+	fmt.Printf("Feed Name: %s\n", feed_follow.FeedName)
+	fmt.Printf("User Name: %s\n", feed_follow.UserName)
 
 	return nil
 }
