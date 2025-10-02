@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/xml"
 	"fmt"
+	"html"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -38,6 +42,7 @@ func main() {
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -157,4 +162,67 @@ func handlerUsers(s *state, cmd command) error {
 	}
 
 	return nil
+}
+
+func handlerAgg(s *state, cmd command) error {
+	//Todo: parse args
+
+	rssFeed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return fmt.Errorf("unable to fetch feed: %w", err)
+	}
+
+	fmt.Printf("%v\n", *rssFeed)
+
+	return nil
+}
+
+type RSSFeed struct {
+	Channel struct {
+		Title       string    `xml:"title"`
+		Link        string    `xml:"link"`
+		Description string    `xml:"description"`
+		Item        []RSSItem `xml:"item"`
+	} `xml:"channel"`
+}
+
+type RSSItem struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate"`
+}
+
+func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to make new requst: %w", err)
+	}
+	req.Header.Set("User-Agent", "gator")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("unable to do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	xmlBlob, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read response body: %w", err)
+	}
+
+	var rssFeed RSSFeed
+	if err := xml.Unmarshal(xmlBlob, &rssFeed); err != nil {
+		return nil, fmt.Errorf("unable to unmarshal xml: %w", err)
+	}
+
+	rssFeed.Channel.Title = html.UnescapeString(rssFeed.Channel.Title)
+	rssFeed.Channel.Description = html.UnescapeString(rssFeed.Channel.Description)
+	for i := range rssFeed.Channel.Item {
+		raw := rssFeed.Channel.Item[i].Description
+		rssFeed.Channel.Item[i].Description = html.UnescapeString(raw)
+		raw = rssFeed.Channel.Item[i].Title
+		rssFeed.Channel.Item[i].Title = html.UnescapeString(raw)
+	}
+
+	return &rssFeed, nil
 }
