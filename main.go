@@ -46,6 +46,7 @@ func main() {
 	cmds.register("addfeed", handlerAddFeed)
 	cmds.register("feeds", handlerFeeds)
 	cmds.register("follow", handlerFollow)
+	cmds.register("following", handlerFollowing)
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -209,6 +210,20 @@ func handlerAddFeed(s *state, cmd command) error {
 	fmt.Printf("feed created:\n")
 	fmt.Printf("%v\n", feed)
 
+	now = time.Now()
+	feedFollowArgs := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: now,
+		UpdatedAt: now,
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	}
+
+	_, err = s.db.CreateFeedFollow(context.Background(), feedFollowArgs)
+	if err != nil {
+		return fmt.Errorf("unable to create feed_follow: %w", err)
+	}
+
 	return nil
 }
 
@@ -267,6 +282,21 @@ func handlerFollow(s *state, cmd command) error {
 	fmt.Printf("created feed_follow:\n")
 	fmt.Printf("Feed Name: %s\n", feed_follow.FeedName)
 	fmt.Printf("User Name: %s\n", feed_follow.UserName)
+
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command) error {
+	currentUser := s.cfg.CurrentUserName
+	feed_follows, err := s.db.GetFeedFollowsForUserByName(context.Background(), currentUser)
+	if err != nil {
+		return fmt.Errorf("unable to get feed follows for user: %w", err)
+	}
+
+	fmt.Printf("Feeds %s is following:\n", currentUser)
+	for _, feed_follow := range feed_follows {
+		fmt.Println(feed_follow.FeedName)
+	}
 
 	return nil
 }
