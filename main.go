@@ -43,6 +43,7 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -173,6 +174,38 @@ func handlerAgg(s *state, cmd command) error {
 	}
 
 	fmt.Printf("%v\n", *rssFeed)
+
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.args) != 2 {
+		return fmt.Errorf("addfeed expects two args: name and url")
+	}
+
+	name, url := cmd.args[0], cmd.args[1]
+	currentUser := s.cfg.CurrentUserName
+	user, err := s.db.GetUser(context.Background(), currentUser)
+	if err != nil {
+		return fmt.Errorf("unable to get user! %w", err)
+	}
+
+	now := time.Now()
+	params := database.CreateFeedParams{
+		ID:        uuid.New(),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Name:      name,
+		Url:       url,
+		UserID:    user.ID,
+	}
+	feed, err := s.db.CreateFeed(context.Background(), params)
+	if err != nil {
+		return fmt.Errorf("unable to create feed! %w", err)
+	}
+
+	fmt.Printf("feed created:\n")
+	fmt.Printf("%v\n", feed)
 
 	return nil
 }
