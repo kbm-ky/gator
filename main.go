@@ -170,14 +170,31 @@ func handlerUsers(s *state, cmd command) error {
 }
 
 func handlerAgg(s *state, cmd command) error {
-	//Todo: parse args
+	//check args
+	if len(cmd.args) != 1 {
+		return fmt.Errorf("agg expects 1 argument, time_between_reqs")
+	}
+	time_between_reqs := cmd.args[0]
 
-	rssFeed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	duration, err := time.ParseDuration(time_between_reqs)
 	if err != nil {
-		return fmt.Errorf("unable to fetch feed: %w", err)
+		return fmt.Errorf("unable to parse time between requests: %w", err)
 	}
 
-	fmt.Printf("%v\n", *rssFeed)
+	ticker := time.NewTicker(duration)
+	for ; ; <-ticker.C {
+		fmt.Printf("Collect feeds every %s\n", duration.String())
+		if err := scrapeFeeds(s); err != nil {
+			return fmt.Errorf("unable to scrap feed: %w", err)
+		}
+		fmt.Println()
+	}
+	// rssFeed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	// if err != nil {
+	// 	return fmt.Errorf("unable to fetch feed: %w", err)
+	// }
+
+	// fmt.Printf("%v\n", *rssFeed)
 
 	return nil
 }
@@ -328,6 +345,36 @@ func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) 
 
 		return handler(s, cmd, user)
 	}
+}
+
+func scrapeFeeds(s *state) error {
+	feed, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		return fmt.Errorf("unable to get next feed to fetch: %w", err)
+	}
+
+	now := time.Now()
+	markArgs := database.MarkFeedFetchedParams{
+		ID:            feed.ID,
+		LastFetchedAt: sql.NullTime{Time: now, Valid: true},
+		UpdatedAt:     now,
+	}
+	err = s.db.MarkFeedFetched(context.Background(), markArgs)
+	if err != nil {
+		return fmt.Errorf("unable to mark feed fetched: %w", err)
+	}
+
+	rssFeed, err := fetchFeed(context.Background(), feed.Url)
+	if err != nil {
+		return fmt.Errorf("unable to fetch feed: %w", err)
+	}
+
+	fmt.Printf("Channel: %s\n", rssFeed.Channel.Title)
+	for _, item := range rssFeed.Channel.Item {
+		fmt.Printf("Title: %s\n", item.Title)
+	}
+
+	return nil
 }
 
 type RSSFeed struct {
