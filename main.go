@@ -43,10 +43,10 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
-	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	cmds.register("feeds", handlerFeeds)
-	cmds.register("follow", handlerFollow)
-	cmds.register("following", handlerFollowing)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -181,17 +181,12 @@ func handlerAgg(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, user database.User) error {
 	if len(cmd.args) != 2 {
 		return fmt.Errorf("addfeed expects two args: name and url")
 	}
 
 	name, url := cmd.args[0], cmd.args[1]
-	currentUser := s.cfg.CurrentUserName
-	user, err := s.db.GetUser(context.Background(), currentUser)
-	if err != nil {
-		return fmt.Errorf("unable to get user! %w", err)
-	}
 
 	now := time.Now()
 	params := database.CreateFeedParams{
@@ -249,7 +244,7 @@ func handlerFeeds(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollow(s *state, cmd command) error {
+func handlerFollow(s *state, cmd command, user database.User) error {
 	if len(cmd.args) != 1 {
 		return fmt.Errorf("follow expects 1 argument: url")
 	}
@@ -257,12 +252,6 @@ func handlerFollow(s *state, cmd command) error {
 	feed, err := s.db.GetFeedByUrl(context.Background(), url)
 	if err != nil {
 		return fmt.Errorf("unable to get feed by url: %w", err)
-	}
-
-	currentUser := s.cfg.CurrentUserName
-	user, err := s.db.GetUser(context.Background(), currentUser)
-	if err != nil {
-		return fmt.Errorf("unable to get user by name: %w", err)
 	}
 
 	now := time.Now()
@@ -286,9 +275,9 @@ func handlerFollow(s *state, cmd command) error {
 	return nil
 }
 
-func handlerFollowing(s *state, cmd command) error {
-	currentUser := s.cfg.CurrentUserName
-	feed_follows, err := s.db.GetFeedFollowsForUserByName(context.Background(), currentUser)
+func handlerFollowing(s *state, cmd command, user database.User) error {
+	currentUser := user.Name
+	feed_follows, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
 	if err != nil {
 		return fmt.Errorf("unable to get feed follows for user: %w", err)
 	}
@@ -299,6 +288,17 @@ func handlerFollowing(s *state, cmd command) error {
 	}
 
 	return nil
+}
+
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return fmt.Errorf("unable to get user: %w", err)
+		}
+
+		return handler(s, cmd, user)
+	}
 }
 
 type RSSFeed struct {
