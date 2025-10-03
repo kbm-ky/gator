@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +49,7 @@ func main() {
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	//finally check command line and dispatch
 	if len(os.Args) < 2 {
@@ -336,6 +338,41 @@ func handlerUnfollow(s *state, cmd command, user database.User) error {
 	return nil
 }
 
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	limitStr := "2"
+	if len(cmd.args) > 0 {
+		limitStr = cmd.args[0]
+	}
+
+	limit, err := strconv.ParseInt(limitStr, 10, 32)
+	if err != nil {
+		return fmt.Errorf("unable to parse limit: %s [%w]", limitStr, err)
+	}
+	if limit < 2 {
+		log.Printf("changing limit to 2")
+		limit = 2
+	}
+
+	args := database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), args)
+	if err != nil {
+		return fmt.Errorf("unable to get posts for user: %w", err)
+	}
+
+	for _, post := range posts {
+		fmt.Printf("Title: %s\n", post.Title.String)
+		fmt.Printf("Url: %s\n", post.Url)
+		fmt.Printf("Description: %s\n", post.Description.String)
+		fmt.Println()
+	}
+
+	return nil
+}
+
 func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
 	return func(s *state, cmd command) error {
 		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
@@ -366,15 +403,72 @@ func scrapeFeeds(s *state) error {
 
 	rssFeed, err := fetchFeed(context.Background(), feed.Url)
 	if err != nil {
-		return fmt.Errorf("unable to fetch feed: %w", err)
+		log.Printf("unable to fetch feed: %v", err)
 	}
 
-	fmt.Printf("Channel: %s\n", rssFeed.Channel.Title)
+	// fmt.Printf("Channel: %s\n", rssFeed.Channel.Title)
+	// for _, item := range rssFeed.Channel.Item {
+	// 	fmt.Printf("Title: %s\n", item.Title)
+	// }
+
+	//Saving to posts
 	for _, item := range rssFeed.Channel.Item {
-		fmt.Printf("Title: %s\n", item.Title)
+		now := time.Now()
+
+		// t, err := time.Parse(time.RFC3339, item.PubDate)
+		t, err := parseTime(item.PubDate)
+		publishedAt := sql.NullTime{}
+		if err != nil {
+			log.Printf("unable to parse time: %s", item.PubDate)
+		} else {
+			publishedAt.Time = t
+			publishedAt.Valid = true
+		}
+
+		title := sql.NullString{}
+		if item.Title != "" {
+			title.String = item.Title
+			title.Valid = true
+		}
+
+		descr := sql.NullString{}
+		if item.Description != "" {
+			descr.String = item.Description
+			descr.Valid = true
+		}
+
+		args := database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Title:       title,
+			Url:         item.Link,
+			Description: descr,
+			PublishedAt: publishedAt,
+			FeedID:      feed.ID,
+		}
+		_, err = s.db.CreatePost(context.Background(), args)
+		if err != nil {
+			log.Printf("unable to create post: %v", err)
+		}
+
 	}
 
 	return nil
+}
+
+func parseTime(timeString string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, timeString)
+	if err == nil {
+		return t, nil
+	}
+
+	t, err = time.Parse(time.RFC1123Z, timeString)
+	if err == nil {
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf("unable to parse time: %s", timeString)
 }
 
 type RSSFeed struct {
